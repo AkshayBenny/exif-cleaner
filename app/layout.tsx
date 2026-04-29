@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { CookieBanner } from '@/components/CookieBanner'
 import { AnalyticsProvider } from '@/components/AnalyticsProvider'
 import { Analytics } from '@vercel/analytics/next'
+import { InstallBanner } from '@/components/InstallBanner'
 const inter = Inter({ subsets: ['latin'], variable: '--font-sans' })
 
 export const viewport: Viewport = {
@@ -108,6 +109,7 @@ export default function RootLayout({
 			</head>
 			<body
 				className={`${inter.variable} font-sans antialiased bg-neutral-50 flex flex-col min-h-screen`}>
+				<InstallBanner />
 				{/* Header */}
 				<header className='sticky top-0 z-50 w-full border-b border-neutral-200 bg-white/80 backdrop-blur-md'>
 					<div className='container mx-auto px-4 h-16 flex items-center justify-between'>
