@@ -1,10 +1,17 @@
-import type { Metadata } from 'next'
+import type { Metadata, Viewport } from 'next'
 import { Inter } from 'next/font/google'
 import './globals.css'
 import { ShieldAlert } from 'lucide-react'
 import Link from 'next/link'
 
 const inter = Inter({ subsets: ['latin'], variable: '--font-sans' })
+
+export const viewport: Viewport = {
+	themeColor: '#171717', // Tailwind neutral-900 to match your app
+	width: 'device-width',
+	initialScale: 1,
+	maximumScale: 1, // Prevents annoying zoom-ins when tapping buttons on mobile
+}
 
 // Custom SVG to replace the removed Lucide Github icon
 function GithubIcon(props: React.SVGProps<SVGSVGElement>) {
@@ -52,6 +59,14 @@ export const metadata: Metadata = {
 		title: 'Image MetaShield',
 		description:
 			'Securely view and strip hidden EXIF metadata from your photos.',
+	},
+	manifest: '/manifest.webmanifest',
+	appleWebApp: {
+		capable: true,
+		statusBarStyle: 'default',
+		title: 'MetaShield',
+		// Tells iOS to use the API route we created for the home screen icon
+		startupImage: ['/api/icon-512'],
 	},
 }
 
