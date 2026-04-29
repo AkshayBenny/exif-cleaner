@@ -3,6 +3,8 @@ import { Inter } from 'next/font/google'
 import './globals.css'
 import { ShieldAlert } from 'lucide-react'
 import Link from 'next/link'
+import { GoogleAnalytics } from '@next/third-parties/google'
+import { CookieBanner } from '@/components/CookieBanner'
 
 const inter = Inter({ subsets: ['latin'], variable: '--font-sans' })
 
@@ -96,6 +98,10 @@ export default function RootLayout({
 }: {
 	children: React.ReactNode
 }) {
+	let consentGranted = false
+	if (typeof window !== 'undefined') {
+		consentGranted = localStorage.getItem('cookie_consent') === 'granted'
+	}
 	return (
 		<html lang='en'>
 			<head>
@@ -162,6 +168,8 @@ export default function RootLayout({
 						</div>
 					</div>
 				</footer>
+				<CookieBanner />
+				{consentGranted && <GoogleAnalytics gaId='G-2FZHBE22X8' />}
 			</body>
 		</html>
 	)

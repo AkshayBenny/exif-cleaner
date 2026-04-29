@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useRef } from 'react'
+import React, { useState, useRef, useEffect } from 'react'
 import exifr from 'exifr'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -20,6 +20,7 @@ import {
 	Trash2,
 	Info,
 } from 'lucide-react'
+import { sendGAEvent } from '@next/third-parties/google'
 
 export default function Home() {
 	const [file, setFile] = useState<File | null>(null)
@@ -45,6 +46,9 @@ export default function Home() {
 	) => {
 		const uploadedFile = event.target.files?.[0]
 		if (!uploadedFile) return
+
+		const fileExtension = uploadedFile.name.split('.').pop()
+		sendGAEvent({ event: 'image_uploaded', value: fileExtension })
 
 		resetState()
 		setFile(uploadedFile)
@@ -78,7 +82,7 @@ export default function Home() {
 
 	const sanitizeAndDownload = () => {
 		if (!previewUrl || !file) return
-
+		sendGAEvent({ event: 'metadata_stripped' })
 		const img = new Image()
 		img.crossOrigin = 'Anonymous'
 		img.onload = () => {
@@ -112,10 +116,20 @@ export default function Home() {
 
 	const openGoogleMaps = () => {
 		if (gpsData) {
+			sendGAEvent({ event: 'opened_maps' })
 			const url = `https://www.google.com/maps/search/?api=1&query=${gpsData.latitude},${gpsData.longitude}`
 			window.open(url, '_blank')
 		}
 	}
+
+	useEffect(() => {
+		const handleAppInstall = () => {
+			sendGAEvent({ event: 'pwa_installed', value: 'success' })
+		}
+		window.addEventListener('appinstalled', handleAppInstall)
+		return () =>
+			window.removeEventListener('appinstalled', handleAppInstall)
+	}, [])
 
 	return (
 		<div className='pb-16 text-neutral-900'>
@@ -126,8 +140,11 @@ export default function Home() {
 				</h1>
 				<p className='text-lg text-neutral-600 mb-8'>
 					Instantly view hidden EXIF data, locate where a photo was
-					taken, and strip sensitive metadata before sharing online.
-					100% free and processed securely in your browser.
+					taken, and strip sensitive metadata before sharing online.{' '}
+					<strong>
+						Your images are processed securely in your browser and
+						never uploaded to our servers.
+					</strong>
 				</p>
 			</section>
 
@@ -332,10 +349,14 @@ export default function Home() {
 							Are my photos uploaded to your servers?
 						</AccordionTrigger>
 						<AccordionContent className='text-neutral-600 leading-relaxed'>
-							No. MetaShield operates entirely locally within your
-							web browser. When you upload a photo, the metadata
-							extraction and sanitization happen directly on your
-							device. We never see, store, or transmit your files.
+							<strong>Absolutely not.</strong> MetaShield operates
+							entirely locally within your web browser. When you
+							upload a photo, the metadata extraction and
+							sanitization happen directly on your device. We
+							never see, store, or transmit your image files. We
+							only use basic analytics to track general website
+							usage (like how many times the &quot;Download&quot; button is
+							clicked).
 						</AccordionContent>
 					</AccordionItem>
 					<AccordionItem value='item-2'>
