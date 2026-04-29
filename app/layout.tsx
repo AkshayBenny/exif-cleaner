@@ -3,10 +3,9 @@ import { Inter } from 'next/font/google'
 import './globals.css'
 import { ShieldAlert } from 'lucide-react'
 import Link from 'next/link'
-import { GoogleAnalytics } from '@next/third-parties/google'
 import { CookieBanner } from '@/components/CookieBanner'
 import { AnalyticsProvider } from '@/components/AnalyticsProvider'
-
+import { Analytics } from '@vercel/analytics/next'
 const inter = Inter({ subsets: ['latin'], variable: '--font-sans' })
 
 export const viewport: Viewport = {
@@ -171,6 +170,7 @@ export default function RootLayout({
 				</footer>
 				<CookieBanner />
 				<AnalyticsProvider />
+        <Analytics/>
 			</body>
 		</html>
 	)

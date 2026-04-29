@@ -3,6 +3,7 @@
 import { GoogleAnalytics } from '@next/third-parties/google'
 import { useEffect, useState } from 'react'
 
+
 export function AnalyticsProvider() {
 	const [consentGranted, setConsentGranted] = useState(false)
 
