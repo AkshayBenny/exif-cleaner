@@ -19,6 +19,7 @@ import {
 	ImageIcon,
 	Trash2,
 	Info,
+	Loader2,
 } from 'lucide-react'
 import { sendGAEvent } from '@next/third-parties/google'
 
@@ -30,7 +31,18 @@ export default function Home() {
 		longitude: number
 	} | null>(null)
 	const [metadata, setMetadata] = useState<Record<string, string>>({})
+
+	// NEW: Added a processing state to prevent mobile freezes
+	const [isProcessing, setIsProcessing] = useState(false)
 	const fileInputRef = useRef<HTMLInputElement>(null)
+
+	useEffect(() => {
+		const handleAppInstall = () =>
+			sendGAEvent({ event: 'pwa_installed', value: 'success' })
+		window.addEventListener('appinstalled', handleAppInstall)
+		return () =>
+			window.removeEventListener('appinstalled', handleAppInstall)
+	}, [])
 
 	const resetState = () => {
 		setFile(null)
@@ -47,71 +59,67 @@ export default function Home() {
 		const uploadedFile = event.target.files?.[0]
 		if (!uploadedFile) return
 
-		// 1. Android/Samsung Safe Naming & Tracking
-		// Android sometimes omits extensions. We fallback to the MIME type (e.g., 'image/jpeg' -> 'jpeg')
-		const fileName = uploadedFile.name.toLowerCase()
-		const mimeType = uploadedFile.type.toLowerCase()
-		const fileExtension = fileName.includes('.')
-			? fileName.split('.').pop()
-			: mimeType.split('/').pop() || 'unknown'
-
-		// Track the safe extension
-		sendGAEvent({ event: 'image_uploaded', value: fileExtension })
-
-		resetState()
-
-		// 2. Universal HEIC/HEIF Check (Fixes Samsung AND Apple)
-		const isHeic =
-			mimeType === 'image/heic' ||
-			mimeType === 'image/heif' ||
-			fileExtension === 'heic' ||
-			fileExtension === 'heif'
-
-		let processFile = uploadedFile
-
-		if (isHeic) {
-			try {
-				const heic2any = (await import('heic2any')).default
-				// Convert High-Efficiency formats to standard JPEG for browser rendering
-				const convertedBlob = await heic2any({
-					blob: uploadedFile,
-					toType: 'image/jpeg',
-					quality: 0.8,
-				})
-
-				const finalBlob = Array.isArray(convertedBlob)
-					? convertedBlob[0]
-					: convertedBlob
-
-				// Safely repackage the file with a guaranteed .jpg extension
-				const safeName = fileName.includes('.')
-					? fileName.replace(/\.[^/.]+$/, '.jpg')
-					: 'converted_image.jpg'
-
-				processFile = new File([finalBlob], safeName, {
-					type: 'image/jpeg',
-				})
-			} catch (error) {
-				console.error('Failed to convert HEIC/HEIF image', error)
-				alert(
-					'Your phone generated an unsupported image format. Please try another photo.',
-				)
-				return
-			}
-		}
-
-		// 3. Set the verified, safe file into our UI state
-		setFile(processFile)
-		setPreviewUrl(URL.createObjectURL(processFile))
+		setIsProcessing(true) // Start the loading spinner
 
 		try {
-			// 4. Extract Data (Using original file for pure EXIF reading)
-			const gps = await exifr.gps(uploadedFile)
+			const fileName = uploadedFile.name.toLowerCase()
+			const mimeType = uploadedFile.type.toLowerCase()
+			const fileExtension = fileName.includes('.')
+				? fileName.split('.').pop()
+				: mimeType.split('/').pop() || 'unknown'
+
+			sendGAEvent({ event: 'image_uploaded', value: fileExtension })
+			resetState()
+
+			// Ensure we keep the original file for naming purposes during download
+			setFile(uploadedFile)
+
+			// 1. Mobile-Safe HEIC/HEIF Conversion
+			const isHeic =
+				mimeType === 'image/heic' ||
+				mimeType === 'image/heif' ||
+				fileExtension === 'heic' ||
+				fileExtension === 'heif'
+			let previewBlob: Blob | File = uploadedFile
+
+			if (isHeic) {
+				try {
+					// Bulletproof dynamic import
+					const heic2anyModule = await import('heic2any')
+					const heic2any = heic2anyModule.default || heic2anyModule
+
+					const convertedBlob = await heic2any({
+						blob: uploadedFile,
+						toType: 'image/jpeg',
+						quality: 0.8, // Compress slightly to save mobile RAM
+					})
+
+					// SAFARI FIX: Use the Blob directly for the preview instead of constructing a new File object
+					previewBlob = Array.isArray(convertedBlob)
+						? convertedBlob[0]
+						: convertedBlob
+				} catch (error) {
+					console.error('Failed to convert HEIC/HEIF image', error)
+					alert(
+						'Your phone generated an unsupported image format. Please try another photo.',
+					)
+					return
+				}
+			}
+
+			// Create the safe preview URL
+			setPreviewUrl(URL.createObjectURL(previewBlob))
+
+			// 2. Crash-Proof EXIF Extraction (Always use original uploadedFile)
+			// We use .catch(() => null) so if the mobile browser stripped the data, the app doesn't crash
+			const gps = await exifr.gps(uploadedFile).catch(() => null)
 			if (gps) {
 				setGpsData({ latitude: gps.latitude, longitude: gps.longitude })
 			}
 
-			const rawMetadata = await exifr.parse(uploadedFile)
+			const rawMetadata = await exifr
+				.parse(uploadedFile)
+				.catch(() => null)
 			if (rawMetadata) {
 				const readableData: Record<string, string> = {}
 				for (const [key, value] of Object.entries(rawMetadata)) {
@@ -127,13 +135,18 @@ export default function Home() {
 				setMetadata(readableData)
 			}
 		} catch (error) {
-			console.error('Error reading EXIF data', error)
+			console.error('Critical error during file processing', error)
+			alert('An error occurred while processing this image.')
+		} finally {
+			setIsProcessing(false) // Turn off the spinner no matter what happens
 		}
 	}
 
 	const sanitizeAndDownload = () => {
 		if (!previewUrl || !file) return
+
 		sendGAEvent({ event: 'metadata_stripped' })
+
 		const img = new Image()
 		img.crossOrigin = 'Anonymous'
 		img.onload = () => {
@@ -150,14 +163,19 @@ export default function Home() {
 							const url = URL.createObjectURL(blob)
 							const a = document.createElement('a')
 							a.href = url
-							a.download = `sanitized_${file.name}`
+							// Guarantee a safe extension for download
+							const safeName = file.name.replace(
+								/\.(heic|heif)$/i,
+								'.jpg',
+							)
+							a.download = `sanitized_${safeName}`
 							document.body.appendChild(a)
 							a.click()
 							document.body.removeChild(a)
 							URL.revokeObjectURL(url)
 						}
 					},
-					file.type || 'image/jpeg',
+					'image/jpeg',
 					1.0,
 				)
 			}
@@ -168,23 +186,15 @@ export default function Home() {
 	const openGoogleMaps = () => {
 		if (gpsData) {
 			sendGAEvent({ event: 'opened_maps' })
-			const url = `https://www.google.com/maps/search/?api=1&query=${gpsData.latitude},${gpsData.longitude}`
-			window.open(url, '_blank')
+			window.open(
+				`https://www.google.com/maps/search/?api=1&query=${gpsData.latitude},${gpsData.longitude}`,
+				'_blank',
+			)
 		}
 	}
 
-	useEffect(() => {
-		const handleAppInstall = () => {
-			sendGAEvent({ event: 'pwa_installed', value: 'success' })
-		}
-		window.addEventListener('appinstalled', handleAppInstall)
-		return () =>
-			window.removeEventListener('appinstalled', handleAppInstall)
-	}, [])
-
 	return (
 		<div className='pb-16 text-neutral-900'>
-			{/* Hero Section */}
 			<section className='pt-20 pb-12 px-4 text-center max-w-3xl mx-auto'>
 				<h1 className='text-4xl md:text-5xl font-bold tracking-tight mb-4'>
 					Secure Your Image Privacy
@@ -199,39 +209,60 @@ export default function Home() {
 				</p>
 			</section>
 
-			{/* The Tool Section */}
 			<section className='px-4 max-w-4xl mx-auto mb-24'>
 				<Card className='w-full shadow-sm border-neutral-200'>
 					<CardContent className='p-6'>
 						{!file ? (
 							<div
-								onClick={() => fileInputRef.current?.click()}
-								className='border-2 border-dashed border-neutral-300 rounded-xl p-20 text-center cursor-pointer hover:bg-neutral-100 hover:border-neutral-400 transition-all duration-200 group'>
-								<UploadCloud className='w-12 h-12 mx-auto text-neutral-400 group-hover:text-neutral-600 mb-4 transition-colors' />
-								<p className='text-base font-medium text-neutral-600'>
-									Click or drag an image to upload
-								</p>
-								<p className='text-sm text-neutral-400 mt-1'>
-									JPEG, PNG, WEBP supported
-								</p>
+								onClick={() =>
+									!isProcessing &&
+									fileInputRef.current?.click()
+								}
+								className={`border-2 border-dashed rounded-xl p-20 text-center transition-all duration-200 ${isProcessing ? 'border-blue-300 bg-blue-50 cursor-wait' : 'border-neutral-300 cursor-pointer hover:bg-neutral-100 hover:border-neutral-400 group'}`}>
+								{isProcessing ? (
+									<div className='flex flex-col items-center'>
+										<Loader2 className='w-12 h-12 text-blue-600 animate-spin mb-4' />
+										<p className='text-base font-medium text-blue-800'>
+											Processing image locally...
+										</p>
+										<p className='text-sm text-blue-600 mt-1'>
+											Large mobile files may take a few
+											seconds.
+										</p>
+									</div>
+								) : (
+									<>
+										<UploadCloud className='w-12 h-12 mx-auto text-neutral-400 group-hover:text-neutral-600 mb-4 transition-colors' />
+										<p className='text-base font-medium text-neutral-600'>
+											Tap or click to upload an image
+										</p>
+										<p className='text-sm text-neutral-400 mt-1'>
+											JPEG, PNG, HEIC supported
+										</p>
+									</>
+								)}
 								<input
 									type='file'
 									ref={fileInputRef}
 									onChange={handleFileUpload}
 									className='hidden'
-									accept='image/jpeg, image/png, image/webp'
+									accept='image/jpeg, image/png, image/webp, image/heic, image/heif'
+									disabled={isProcessing}
 								/>
 							</div>
 						) : (
 							<div className='grid grid-cols-1 lg:grid-cols-2 gap-8'>
-								{/* Left Column: Image & Removal */}
 								<div className='space-y-4'>
-									<div className='relative aspect-square rounded-xl overflow-hidden bg-neutral-100 border border-neutral-200'>
-										<img
-											src={previewUrl!}
-											alt='Preview'
-											className='object-cover w-full h-full'
-										/>
+									<div className='relative aspect-square rounded-xl overflow-hidden bg-neutral-100 border border-neutral-200 flex items-center justify-center'>
+										{previewUrl ? (
+											<img
+												src={previewUrl}
+												alt='Preview'
+												className='object-contain w-full h-full'
+											/>
+										) : (
+											<Loader2 className='w-8 h-8 text-neutral-400 animate-spin' />
+										)}
 									</div>
 
 									<div className='flex items-center justify-between bg-white p-3 border border-neutral-200 rounded-lg'>
@@ -261,9 +292,7 @@ export default function Home() {
 									</div>
 								</div>
 
-								{/* Right Column: Actions & Metadata */}
 								<div className='flex flex-col h-full space-y-6'>
-									{/* Actions */}
 									<div className='space-y-3'>
 										<h3 className='text-sm font-semibold text-neutral-900 uppercase tracking-wider mb-3'>
 											Quick Actions
@@ -292,7 +321,6 @@ export default function Home() {
 
 									<Separator />
 
-									{/* Metadata Display */}
 									<div className='flex-1 flex flex-col overflow-hidden min-h-[250px]'>
 										<h3 className='text-sm font-semibold text-neutral-900 uppercase tracking-wider mb-3 flex items-center gap-2'>
 											<Info className='w-4 h-4' />{' '}
@@ -319,8 +347,16 @@ export default function Home() {
 												</div>
 											</ScrollArea>
 										) : (
-											<div className='flex-1 flex items-center justify-center border border-neutral-200 border-dashed rounded-lg bg-neutral-50 text-sm text-neutral-400'>
-												No readable metadata found.
+											<div className='flex-1 flex flex-col items-center justify-center p-6 border border-neutral-200 border-dashed rounded-lg bg-neutral-50 text-center'>
+												<p className='text-sm font-medium text-neutral-600 mb-1'>
+													No readable metadata found.
+												</p>
+												<p className='text-xs text-neutral-400'>
+													Mobile browsers often strip
+													data for privacy. Try
+													uploading an original file
+													directly from your computer.
+												</p>
 											</div>
 										)}
 									</div>
