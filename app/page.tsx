@@ -1,5 +1,6 @@
 'use client'
 
+import heic2any from 'heic2any'
 import React, { useState, useRef, useEffect } from 'react'
 import exifr from 'exifr'
 import { Button } from '@/components/ui/button'
@@ -47,14 +48,64 @@ export default function Home() {
 		const uploadedFile = event.target.files?.[0]
 		if (!uploadedFile) return
 
-		const fileExtension = uploadedFile.name.split('.').pop()
+		// 1. Android/Samsung Safe Naming & Tracking
+		// Android sometimes omits extensions. We fallback to the MIME type (e.g., 'image/jpeg' -> 'jpeg')
+		const fileName = uploadedFile.name.toLowerCase()
+		const mimeType = uploadedFile.type.toLowerCase()
+		const fileExtension = fileName.includes('.')
+			? fileName.split('.').pop()
+			: mimeType.split('/').pop() || 'unknown'
+
+		// Track the safe extension
 		sendGAEvent({ event: 'image_uploaded', value: fileExtension })
 
 		resetState()
-		setFile(uploadedFile)
-		setPreviewUrl(URL.createObjectURL(uploadedFile))
+
+		// 2. Universal HEIC/HEIF Check (Fixes Samsung AND Apple)
+		const isHeic =
+			mimeType === 'image/heic' ||
+			mimeType === 'image/heif' ||
+			fileExtension === 'heic' ||
+			fileExtension === 'heif'
+
+		let processFile = uploadedFile
+
+		if (isHeic) {
+			try {
+				// Convert High-Efficiency formats to standard JPEG for browser rendering
+				const convertedBlob = await heic2any({
+					blob: uploadedFile,
+					toType: 'image/jpeg',
+					quality: 0.8,
+				})
+
+				const finalBlob = Array.isArray(convertedBlob)
+					? convertedBlob[0]
+					: convertedBlob
+
+				// Safely repackage the file with a guaranteed .jpg extension
+				const safeName = fileName.includes('.')
+					? fileName.replace(/\.[^/.]+$/, '.jpg')
+					: 'converted_image.jpg'
+
+				processFile = new File([finalBlob], safeName, {
+					type: 'image/jpeg',
+				})
+			} catch (error) {
+				console.error('Failed to convert HEIC/HEIF image', error)
+				alert(
+					'Your phone generated an unsupported image format. Please try another photo.',
+				)
+				return
+			}
+		}
+
+		// 3. Set the verified, safe file into our UI state
+		setFile(processFile)
+		setPreviewUrl(URL.createObjectURL(processFile))
 
 		try {
+			// 4. Extract Data (Using original file for pure EXIF reading)
 			const gps = await exifr.gps(uploadedFile)
 			if (gps) {
 				setGpsData({ latitude: gps.latitude, longitude: gps.longitude })
@@ -355,8 +406,8 @@ export default function Home() {
 							sanitization happen directly on your device. We
 							never see, store, or transmit your image files. We
 							only use basic analytics to track general website
-							usage (like how many times the &quot;Download&quot; button is
-							clicked).
+							usage (like how many times the &quot;Download&quot;
+							button is clicked).
 						</AccordionContent>
 					</AccordionItem>
 					<AccordionItem value='item-2'>

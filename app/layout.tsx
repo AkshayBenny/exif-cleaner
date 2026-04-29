@@ -5,6 +5,7 @@ import { ShieldAlert } from 'lucide-react'
 import Link from 'next/link'
 import { GoogleAnalytics } from '@next/third-parties/google'
 import { CookieBanner } from '@/components/CookieBanner'
+import { AnalyticsProvider } from '@/components/AnalyticsProvider'
 
 const inter = Inter({ subsets: ['latin'], variable: '--font-sans' })
 
@@ -169,7 +170,7 @@ export default function RootLayout({
 					</div>
 				</footer>
 				<CookieBanner />
-				{consentGranted && <GoogleAnalytics gaId='G-2FZHBE22X8' />}
+				<AnalyticsProvider />
 			</body>
 		</html>
 	)
