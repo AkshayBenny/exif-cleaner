@@ -1,6 +1,5 @@
 'use client'
 
-import heic2any from 'heic2any'
 import React, { useState, useRef, useEffect } from 'react'
 import exifr from 'exifr'
 import { Button } from '@/components/ui/button'
@@ -72,6 +71,7 @@ export default function Home() {
 
 		if (isHeic) {
 			try {
+				const heic2any = (await import('heic2any')).default
 				// Convert High-Efficiency formats to standard JPEG for browser rendering
 				const convertedBlob = await heic2any({
 					blob: uploadedFile,

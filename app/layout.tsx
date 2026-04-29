@@ -98,10 +98,6 @@ export default function RootLayout({
 }: {
 	children: React.ReactNode
 }) {
-	let consentGranted = false
-	if (typeof window !== 'undefined') {
-		consentGranted = localStorage.getItem('cookie_consent') === 'granted'
-	}
 	return (
 		<html lang='en'>
 			<head>
@@ -170,7 +166,7 @@ export default function RootLayout({
 				</footer>
 				<CookieBanner />
 				<AnalyticsProvider />
-        <Analytics/>
+				<Analytics />
 			</body>
 		</html>
 	)
