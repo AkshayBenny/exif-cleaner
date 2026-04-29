@@ -59,7 +59,7 @@ export default function Home() {
 		const uploadedFile = event.target.files?.[0]
 		if (!uploadedFile) return
 
-		setIsProcessing(true) // Start the loading spinner
+		setIsProcessing(true)
 
 		try {
 			const fileName = uploadedFile.name.toLowerCase()
@@ -70,31 +70,45 @@ export default function Home() {
 
 			sendGAEvent({ event: 'image_uploaded', value: fileExtension })
 			resetState()
-
-			// Ensure we keep the original file for naming purposes during download
 			setFile(uploadedFile)
 
-			// 1. Mobile-Safe HEIC/HEIF Conversion
+			// 1. THE FIX: Force Android to load the file into raw memory.
+			// This prevents the "phantom file" broken image bug.
+			const arrayBuffer = await new Promise<ArrayBuffer>(
+				(resolve, reject) => {
+					const reader = new FileReader()
+					reader.onload = () => resolve(reader.result as ArrayBuffer)
+					reader.onerror = () =>
+						reject(new Error('Failed to read file into memory'))
+					reader.readAsArrayBuffer(uploadedFile)
+				},
+			)
+
+			// 2. Mobile-Safe HEIC/HEIF Conversion
 			const isHeic =
 				mimeType === 'image/heic' ||
 				mimeType === 'image/heif' ||
 				fileExtension === 'heic' ||
 				fileExtension === 'heif'
-			let previewBlob: Blob | File = uploadedFile
+
+			let previewBlob: Blob
 
 			if (isHeic) {
 				try {
-					// Bulletproof dynamic import
 					const heic2anyModule = await import('heic2any')
 					const heic2any = heic2anyModule.default || heic2anyModule
 
-					const convertedBlob = await heic2any({
-						blob: uploadedFile,
-						toType: 'image/jpeg',
-						quality: 0.8, // Compress slightly to save mobile RAM
+					// Reconstruct the blob from our guaranteed memory buffer
+					const heicBlob = new Blob([arrayBuffer], {
+						type: mimeType || 'image/heic',
 					})
 
-					// SAFARI FIX: Use the Blob directly for the preview instead of constructing a new File object
+					const convertedBlob = await heic2any({
+						blob: heicBlob,
+						toType: 'image/jpeg',
+						quality: 0.8,
+					})
+
 					previewBlob = Array.isArray(convertedBlob)
 						? convertedBlob[0]
 						: convertedBlob
@@ -103,23 +117,27 @@ export default function Home() {
 					alert(
 						'Your phone generated an unsupported image format. Please try another photo.',
 					)
+					setIsProcessing(false)
 					return
 				}
+			} else {
+				// Construct a clean Blob from the raw memory buffer for JPEGs/PNGs
+				previewBlob = new Blob([arrayBuffer], {
+					type: mimeType || 'image/jpeg',
+				})
 			}
 
-			// Create the safe preview URL
 			setPreviewUrl(URL.createObjectURL(previewBlob))
 
-			// 2. Crash-Proof EXIF Extraction (Always use original uploadedFile)
-			// We use .catch(() => null) so if the mobile browser stripped the data, the app doesn't crash
-			const gps = await exifr.gps(uploadedFile).catch(() => null)
+			// 3. Crash-Proof EXIF Extraction (Using the raw ArrayBuffer)
+			// exifr is much more reliable at extracting data from raw ArrayBuffers on mobile
+			const gps = await exifr.gps(arrayBuffer).catch(() => null)
 			if (gps) {
 				setGpsData({ latitude: gps.latitude, longitude: gps.longitude })
 			}
 
-			const rawMetadata = await exifr
-				.parse(uploadedFile)
-				.catch(() => null)
+			const rawMetadata = await exifr.parse(arrayBuffer).catch(() => null)
+
 			if (rawMetadata) {
 				const readableData: Record<string, string> = {}
 				for (const [key, value] of Object.entries(rawMetadata)) {
@@ -138,7 +156,7 @@ export default function Home() {
 			console.error('Critical error during file processing', error)
 			alert('An error occurred while processing this image.')
 		} finally {
-			setIsProcessing(false) // Turn off the spinner no matter what happens
+			setIsProcessing(false)
 		}
 	}
 
